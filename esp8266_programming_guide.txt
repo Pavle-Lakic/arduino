@@ -8,3 +8,5 @@ Normal mode:
 After code is uploaded to ESP8266, to get in normal mode first disconnect GPIO0 from protoboard.
 Next set RST to GND for a second, then disconnect it from GND and leave it open.
 Code that was uploaded to ESP8266 should start executing afterwards.
+Connect TX of ESP8266 to OPAMP and scale its value to 5V to prevent error TX messages.
+After that connect output of OPAMP to USB2UART`s RX.
