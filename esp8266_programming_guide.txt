@@ -1,0 +1,10 @@
+Programming mode:
+Set GPIO0 to GND.
+Set RST to GND, then remove it. You should see LED flash for a moment.
+Connect RX from USB2UART to TX of ESP8266. TX from USB2UART to RX of ESP8266.
+Set Flash mode DIO in Tools tab of Arduino IDE.
+
+Normal mode:
+After code is uploaded to ESP8266, to get in normal mode first disconnect GPIO0 from protoboard.
+Next set RST to GND for a second, then disconnect it from GND and leave it open.
+Code that was uploaded to ESP8266 should start executing afterwards.
