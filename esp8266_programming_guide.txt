@@ -1,16 +1,25 @@
-Programming mode:
-Set GPIO0 to GND.
-Set RST to GND, then remove it. You should see LED flash for a moment.
-Connect RX from USB2UART to TX of ESP8266. TX from USB2UART to RX of ESP8266.
-Set Flash mode DIO in Tools tab of Arduino IDE.
+ESP8266-12E:
+	Programming mode:
+		Set GPIO0 to GND.
+		Press reset button. You should see LED flash for a moment.
+		Connect RX from USB2UART to TX of ESP8266. TX from USB2UART to RX of ESP8266.
+		Set Flash mode DIO in Tools tab of Arduino IDE.
 
-Normal mode:
-After code is uploaded to ESP8266, to get in normal mode first disconnect GPIO0 from protoboard.
-Next set RST to GND for a second, then disconnect it from GND and leave it open.
-Code that was uploaded to ESP8266 should start executing afterwards.
-Connect TX of ESP8266 to OPAMP and scale its value to 5V to prevent error TX messages.
-After that connect output of OPAMP to USB2UART`s RX.
+	Normal mode:
+		After code is uploaded to ESP8266, to get in normal mode first disconnect GPIO0 from protoboard.
+		Next set RST to GND for a second, then disconnect it from GND and leave it open.
+		Code that was uploaded to ESP8266 should start executing afterwards.
+		Connect TX of ESP8266 to OPAMP and scale its value to 5V to prevent error TX messages.
+		After that connect output of OPAMP to USB2UART`s RX.
 
-Switches position:
-To program ESP8266 set all switches to down, then click reset button.
-To set ESP8266 in normal mode, set all switches to up, then click reset button.
+	Switches position:
+		To program ESP8266 set all switches to down, then click reset button.
+		To set ESP8266 in normal mode, set all switches to up, then click reset button.
+
+ESP8266-01:
+	Programming mode:
+		Set GPIO0 to GND (switch down) then press reset button. Then unplug GPIO0 from GND (switch up).
+		Rest is the same as for ESP8266-12E.
+	
+	Note:
+		OPAMP is not needed for correct output.
