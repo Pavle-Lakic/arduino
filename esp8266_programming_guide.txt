@@ -10,3 +10,7 @@ Next set RST to GND for a second, then disconnect it from GND and leave it open.
 Code that was uploaded to ESP8266 should start executing afterwards.
 Connect TX of ESP8266 to OPAMP and scale its value to 5V to prevent error TX messages.
 After that connect output of OPAMP to USB2UART`s RX.
+
+Switches position:
+To program ESP8266 set all switches to down, then click reset button.
+To set ESP8266 in normal mode, set all switches to up, then click reset button.
