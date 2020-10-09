@@ -18,11 +18,9 @@ void setup(void)
 
 void loop(void)
 {
-  /*
   unsigned short adc_val;
   adc_val = analogRead(A0);
   Serial.print("ADC value = ");
   Serial.println(adc_val);
   delay(1000);
-  */
 }
