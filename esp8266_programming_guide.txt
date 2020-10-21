@@ -1,4 +1,4 @@
-ESP8266-12E:
+ESP8266-12E and ESP8266-01:
 	Programming mode:
 		Set GPIO0 to GND.
 		Press reset button. You should see LED flash for a moment.
@@ -15,11 +15,3 @@ ESP8266-12E:
 	Switches position:
 		To program ESP8266 set all switches to down, then click reset button.
 		To set ESP8266 in normal mode, set all switches to up, then click reset button.
-
-ESP8266-01:
-	Programming mode:
-		Set GPIO0 to GND (switch down) then press reset button. Then unplug GPIO0 from GND (switch up).
-		Rest is the same as for ESP8266-12E.
-	
-	Note:
-		OPAMP is not needed for correct output.
