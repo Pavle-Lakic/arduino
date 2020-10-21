@@ -1,6 +1,13 @@
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <ESP8266TrueRandom.h>
+#include <stdlib.h>
+
+#define NUMBER_OF_NODES       2
+/*
+ * Once enabled will print debug messages.
+ */
+#define DEBUG                 0
 
 /*
  * STASSID will change, depending if node is CH or not.
@@ -24,7 +31,22 @@
 #define TIME_LENGTH           5
 #define TIME_NUMBER_LENGTH    3
 
-struct Packet 
+/*
+ * Change this for each node
+ */
+#define MY_NAME_IS_NODE       0
+/*
+ * Node numbers. Two for now [0, 1]
+ */
+#define NODE_0                0
+#define NODE_1                1 
+
+/*
+ * Broadcast port to listen to in setup mode
+ */
+#define BROADCAST_PORT        2000
+
+typedef struct Packet 
 {
   char UID[UID_LENGTH];
   char UID_NUMBER[UID_NUMBER_LENGTH];
@@ -36,22 +58,21 @@ struct Packet
   char ROUND_NUMBER[ROUND_NUMBER_LENGTH];
   char TIME[TIME_LENGTH];
   char TIME_NUMBER[TIME_NUMBER_LENGTH];
-};
+} Packet;
 
-/*
- * Broadcast port to listen to in setup mode
- */
-unsigned int broadcast_port = 2000;
+typedef struct Node
+{
+  unsigned char uid;
+  float t;
+  float r;
+  unsigned char round_cnt;
+  unsigned char time_cnt;
+} Node;
 
 /* 
  *  On this port number each node will send their data
  */
 unsigned int global_write_port = 8888;
-
-/*
- * Number of rounds, for now two rounds.
- */
-unsigned char N = 2;
 
 /*
  * Number of times node has been cluster head.
@@ -61,18 +82,17 @@ unsigned char times_CH = 0;
 /*
  * Current number of round ( 0 to N - 1 )
  */
-unsigned short cycle = 0;
+unsigned short round_cnt = 0;
 
 /*
  * Time at which uc will wake up?
  */
-unsigned short wake_up_time = 5;
+unsigned short time_cnt = 5;
 
 /*
  * Declaration of constants for strings
  */
 const char UID[UID_LENGTH] = "U"; 
-const char UID_number[UID_NUMBER_LENGTH] = "1";
 const char T_letter[T_LENGTH] = "T";
 const char R_letter[R_LENGTH] = "R";
 const char ROUND[ROUND_LENGTH] = "ROUND";
@@ -90,6 +110,8 @@ const float P = 0.5;
 char packetBuffer[UDP_TX_PACKET_MAX_SIZE + 1]; //buffer to hold incoming packet
 char  ReplyBuffer[] = "acknowledged\r\n";       // a string to send back
 char rnd_str[7];
+Node nodes[NUMBER_OF_NODES];// node 0 will be node running this code,
+                            // rest will be other nodes in network.
 
 
 
@@ -123,9 +145,6 @@ float random_number(void)
   return a;
 }
 
-/*
- * For debugging purposes.
- */
 void print_packet(struct Packet *ptr)
 {
   Serial.print(ptr->UID);
@@ -148,6 +167,7 @@ const char* create_packet(struct Packet *ptr)
   char R_str[R_NUMBER_LENGTH];
   char Cyc_str[ROUND_NUMBER_LENGTH];
   char time_str[TIME_NUMBER_LENGTH];
+  char UID_number[UID_NUMBER_LENGTH];
   char text[50];
 
   t = calculate_threshold(P, r);
@@ -156,8 +176,9 @@ const char* create_packet(struct Packet *ptr)
   r = random_number();
   sprintf(R_str, "%.3f", r);
 
-  sprintf(Cyc_str, "%d", cycle);
-  sprintf(time_str, "%d", wake_up_time);
+  sprintf(Cyc_str, "%d", round_cnt);
+  sprintf(time_str, "%d", time_cnt);
+  sprintf(UID_number, "%d", MY_NAME_IS_NODE);
 
   strcpy(ptr->UID, UID);
   strcpy(ptr->UID_NUMBER, UID_number);
@@ -184,10 +205,67 @@ const char* create_packet(struct Packet *ptr)
   return text;
 }
 
+void parse_packet(Packet *ptr, char *txt)
+{
+  char uid[UID_NUMBER_LENGTH];
+  char time_cnt[TIME_NUMBER_LENGTH];
+  char round_cnt[ROUND_NUMBER_LENGTH];
+  char t[T_NUMBER_LENGTH];
+  char r[R_NUMBER_LENGTH];
+  unsigned char node;
+  char *tmp;
+
+  uid[UID_NUMBER_LENGTH - 1] = '\0';
+  time_cnt[TIME_NUMBER_LENGTH - 1] = '\0';
+  round_cnt[ROUND_NUMBER_LENGTH - 1] = '\0';
+  t[T_NUMBER_LENGTH - 1] = '\0';
+  r[R_NUMBER_LENGTH - 1] = '\0';
+  
+  txt += UID_LENGTH - 1;
+  memcpy(uid, txt, sizeof(char));
+  node = strtol(uid, &tmp, 10);
+
+  txt += (T_LENGTH - 1) + (UID_NUMBER_LENGTH - 1);
+  memcpy(t, txt, (T_NUMBER_LENGTH - 1) * sizeof(char));
+  
+  txt += (T_NUMBER_LENGTH - 1) + (R_LENGTH - 1);
+  memcpy(r, txt, (R_NUMBER_LENGTH - 1) * sizeof(char));
+
+  txt += (R_NUMBER_LENGTH - 1) + (ROUND_LENGTH - 1);
+  memcpy(round_cnt, txt, (ROUND_NUMBER_LENGTH - 1) * sizeof(char));
+
+  txt += (TIME_LENGTH);
+  memcpy(time_cnt, txt, (TIME_NUMBER_LENGTH - 1) * sizeof(char));
+  switch (node) {
+
+    case NODE_0:
+
+    nodes[NODE_0].t = atof(t);
+    nodes[NODE_0].r = atof(r);
+    nodes[NODE_0].round_cnt = atol(round_cnt);
+    nodes[NODE_0].time_cnt = atol(time_cnt);
+
+    break;
+
+    case NODE_1:
+    
+    nodes[NODE_1].t = atof(t);
+    nodes[NODE_1].r = atof(r);
+    nodes[NODE_1].round_cnt = atol(round_cnt);
+    nodes[NODE_1].time_cnt = atol(time_cnt);
+    
+    break;
+    
+  }
+}
+
 void setup() {
   float rnd, T;
-  struct Packet packet;
+  Packet packet;
   const char *packet_string;
+  char *tmp;
+  nodes[NODE_0].uid = NODE_0;
+  nodes[NODE_1].uid = NODE_1;
   
   Serial.begin(9600);
   WiFi.mode(WIFI_STA);
@@ -197,10 +275,15 @@ void setup() {
   }
   Serial.print("Connected !\n");
 
-  Udp.begin(broadcast_port);
+  Udp.begin(BROADCAST_PORT);
   packet_string = create_packet(&packet);
 
-  Udp.beginPacket(broadcast, broadcast_port);
+  #if DEBUG
+    print_packet();
+    Serial.println(packet_string);
+  #endif
+
+  Udp.beginPacket(broadcast, BROADCAST_PORT);
   Udp.write(packet_string);
   Udp.endPacket();
 }
@@ -219,6 +302,18 @@ void loop() {
       packetBuffer[n] = 0;
       Serial.println("Contents:");
       Serial.println(packetBuffer);
+      struct Packet remote;
+      parse_packet(&remote, packetBuffer);
+
+      Serial.println(nodes[NODE_0].t, 2);
+      Serial.println(nodes[NODE_0].r, 3);
+      Serial.println(nodes[NODE_0].round_cnt);
+      Serial.println(nodes[NODE_0].time_cnt);
+
+      Serial.println(nodes[NODE_1].t, 2);
+      Serial.println(nodes[NODE_1].r, 3);
+      Serial.println(nodes[NODE_1].round_cnt);
+      Serial.println(nodes[NODE_1].time_cnt);
 /*
       Udp.beginPacket(broadcast, broadcast_port);
       Udp.write(T_letter);
