@@ -3,6 +3,7 @@
 #include <ESP8266TrueRandom.h>
 #include <stdlib.h>
 #include <Ticker.h>
+#include <FS.h>
 
 #define NUMBER_OF_NODES       2
 /*
@@ -37,7 +38,7 @@
 /*
  * Change this for each node
  */
-#define MY_NAME_IS_NODE       1
+#define MY_NAME_IS_NODE       0
 /*
  * Node numbers. Two for now [0, 1]
  */
@@ -48,6 +49,12 @@
  * Broadcast port to listen to in setup mode
  */
 #define BROADCAST_PORT        2000
+
+/*
+ * This is for how long nodes will wait for each other
+ * to connect and send their packets to broadcast address.
+ */
+#define TIMEOUT_TIME          20
 
 typedef struct Packet 
 {
@@ -106,6 +113,11 @@ const char TIME[TIME_LENGTH] = "TIME";
 const char CH[CH_LENGTH] = "CH";
 
 /*
+ * 
+ */
+const char* filename = "/conf.txt";
+
+/*
  * Probability that node will be cluster head or not.
  * Depends on network topology, energy consumption for 
  * communication or processing etc. For simple test,
@@ -133,6 +145,50 @@ IPAddress broadcast(192, 168, 4, 255);
  * Base station IP address, will always be constant
  */
 IPAddress base(192,168,4,1);
+
+void write_fs(unsigned char *round_cnt, unsigned char *ch)
+{
+  File fp;
+  char round_cnt_str[ROUND_NUMBER_LENGTH];
+  char ch_str[CH_NUMBER_LENGTH];
+
+  sprintf(round_cnt_str, "%d", *round_cnt);
+  sprintf(ch_str, "%d", *ch);
+
+  fp = SPIFFS.open(filename, "w");
+
+  if (!fp) {
+    Serial.println("file open failed");
+  }
+  else {
+      fp.write(round_cnt_str, ROUND_NUMBER_LENGTH);
+      fp.write(ch, CH_NUMBER_LENGTH);
+      fp.close();  //Close file
+  }
+}
+
+unsigned char find_master(void)
+{
+  float t_max = 0;
+  unsigned char uid = nodes[MY_NAME_IS_NODE].uid;
+
+  for (int i = 0; i < NUMBER_OF_NODES; i++)
+    if (nodes[i].ch == 1) {
+      if (nodes[i].t > t_max) {
+        t_max = nodes[i].t;
+        uid = nodes[i].uid;
+      }
+    } else {
+      nodes[i].t = 0;
+    }
+    
+  nodes[NODE_0].round_cnt += 1;
+  nodes[NODE_1].round_cnt += 1;
+
+  nodes[uid].ch = 1;
+  return uid;
+}
+
 void disable_count(void)
 {
   enable_count = 0;
@@ -282,21 +338,72 @@ void parse_packet(Packet *ptr, char *txt)
   }
 }
 
+void read_fs(unsigned char *round_cnt, unsigned char *ch)
+{
+  File fp;
+  char round_cnt_str[ROUND_NUMBER_LENGTH];
+  char ch_str[CH_NUMBER_LENGTH];
+
+  fp = SPIFFS.open(filename, "r");
+
+  fp.read((uint8_t*)round_cnt_str, ROUND_NUMBER_LENGTH);
+  fp.read((uint8_t*)ch_str, CH_NUMBER_LENGTH);
+  fp.close();
+
+  *round_cnt = atol(round_cnt_str);
+  *ch = atol(ch_str);
+
+#if DEBUG
+  Serial.println(nodes[MY_NAME_IS_NODE].round_cnt);
+  Serial.println(nodes[MY_NAME_IS_NODE].ch);
+#endif  
+}
+
 void setup() {
   float rnd, T;
+  File fp;
   Packet packet;
   const char *packet_string;
+  char round_cnt_str[ROUND_NUMBER_LENGTH] = "0";
+  char ch[CH_NUMBER_LENGTH] = "1";
   char *tmp;
   nodes[NODE_0].uid = NODE_0;
   nodes[NODE_1].uid = NODE_1;
+  Serial.begin(9600);
+  delay(1000);
+  if(SPIFFS.begin()) {
+ #if DEBUG
+    Serial.println("SPIFFS Initialize....ok");
+ #endif   
+  }
+  else {
+  #if DEBUG
+    Serial.println("SPIFFS Initialization...failed");
+  #endif  
+  }
 
+/*
+  fp = SPIFFS.open(filename, "w");
+  if (!fp) {
+    Serial.println("file open failed");
+  }
+  else
+  {
+    
+      //Write data to file
+      Serial.println("Writing Data to File");
+      fp.write(round_cnt_str, ROUND_NUMBER_LENGTH);
+      fp.write(ch, CH_NUMBER_LENGTH);
+      //Serial.println(round_cnt_str);
+      //Serial.println(ch);
+      fp.close();  //Close file
+  }
+ */
+  read_fs(&nodes[MY_NAME_IS_NODE].round_cnt, &nodes[MY_NAME_IS_NODE].ch);
   nodes[MY_NAME_IS_NODE].r = random_number();
-  nodes[MY_NAME_IS_NODE].round_cnt = round_cnt;
   nodes[MY_NAME_IS_NODE].t = calculate_threshold(P, nodes[MY_NAME_IS_NODE].round_cnt);
   nodes[MY_NAME_IS_NODE].time_cnt = time_cnt;
-  nodes[MY_NAME_IS_NODE].ch = CH_enable;
   
-  Serial.begin(9600);
   WiFi.mode(WIFI_STA);
   WiFi.begin(STASSID, STAPSK);
   while (WiFi.status() != WL_CONNECTED) {
@@ -315,12 +422,13 @@ void setup() {
   Udp.beginPacket(broadcast, BROADCAST_PORT);
   Udp.write(packet_string);
   Udp.endPacket();
+
+  timeout.attach(TIMEOUT_TIME, disable_count);
 }
 
 void loop() {
   int packetSize = Udp.parsePacket();
     if (packetSize && enable_count) {
-      timeout.attach(10, disable_count);
       Serial.printf("Received packet of size %d from %s:%d\n    (to %s:%d, free heap = %d B)\n",
                     packetSize,
                     Udp.remoteIP().toString().c_str(), Udp.remotePort(),
@@ -348,13 +456,5 @@ void loop() {
       Serial.println(nodes[NODE_1].time_cnt);
       Serial.println(nodes[NODE_1].ch);
 #endif      
-/*
-      Udp.beginPacket(broadcast, broadcast_port);
-      Udp.write(T_letter);
-      Udp.write(T_str);
-      Udp.write(R_letter);
-      Udp.write(rnd_str);
-      Udp.endPacket();
-*/
     }
 }
