@@ -2,6 +2,7 @@
 #include <WiFiUdp.h>
 #include <ESP8266TrueRandom.h>
 #include <stdlib.h>
+#include <Ticker.h>
 
 #define NUMBER_OF_NODES       2
 /*
@@ -30,11 +31,13 @@
 #define ROUND_NUMBER_LENGTH   3
 #define TIME_LENGTH           5
 #define TIME_NUMBER_LENGTH    3
+#define CH_LENGTH             3
+#define CH_NUMBER_LENGTH      2
 
 /*
  * Change this for each node
  */
-#define MY_NAME_IS_NODE       0
+#define MY_NAME_IS_NODE       1
 /*
  * Node numbers. Two for now [0, 1]
  */
@@ -58,6 +61,8 @@ typedef struct Packet
   char ROUND_NUMBER[ROUND_NUMBER_LENGTH];
   char TIME[TIME_LENGTH];
   char TIME_NUMBER[TIME_NUMBER_LENGTH];
+  char CH[CH_LENGTH];
+  char CH_NUMBER[CH_NUMBER_LENGTH];
 } Packet;
 
 typedef struct Node
@@ -67,6 +72,7 @@ typedef struct Node
   float r;
   unsigned char round_cnt;
   unsigned char time_cnt;
+  unsigned char ch;
 } Node;
 
 /* 
@@ -77,7 +83,7 @@ unsigned int global_write_port = 8888;
 /*
  * Number of times node has been cluster head.
  */
-unsigned char times_CH = 0;
+unsigned char CH_enable = 1;
 
 /*
  * Current number of round ( 0 to N - 1 )
@@ -97,6 +103,7 @@ const char T_letter[T_LENGTH] = "T";
 const char R_letter[R_LENGTH] = "R";
 const char ROUND[ROUND_LENGTH] = "ROUND";
 const char TIME[TIME_LENGTH] = "TIME";
+const char CH[CH_LENGTH] = "CH";
 
 /*
  * Probability that node will be cluster head or not.
@@ -112,8 +119,9 @@ char  ReplyBuffer[] = "acknowledged\r\n";       // a string to send back
 char rnd_str[7];
 Node nodes[NUMBER_OF_NODES];// node 0 will be node running this code,
                             // rest will be other nodes in network.
+unsigned char enable_count = 1;
 
-
+Ticker timeout;
 
 WiFiUDP Udp;
 
@@ -125,6 +133,10 @@ IPAddress broadcast(192, 168, 4, 255);
  * Base station IP address, will always be constant
  */
 IPAddress base(192,168,4,1);
+void disable_count(void)
+{
+  enable_count = 0;
+}
 
 float calculate_threshold(float P, unsigned char r)
 {
@@ -157,28 +169,27 @@ void print_packet(struct Packet *ptr)
   Serial.print(ptr->ROUND_NUMBER);
   Serial.print(ptr->TIME);
   Serial.print(ptr->TIME_NUMBER);
+  Serial.print(ptr->CH);
+  Serial.print(ptr->CH_NUMBER);
   Serial.println(); 
 }
 
 const char* create_packet(struct Packet *ptr)
 {
-  float t,r;
   char T_str[T_NUMBER_LENGTH];
   char R_str[R_NUMBER_LENGTH];
   char Cyc_str[ROUND_NUMBER_LENGTH];
   char time_str[TIME_NUMBER_LENGTH];
   char UID_number[UID_NUMBER_LENGTH];
-  char text[50];
+  char CH_number[CH_NUMBER_LENGTH];
+  char text[255];
 
-  t = calculate_threshold(P, r);
-  sprintf(T_str, "%.2f", t);
-
-  r = random_number();
-  sprintf(R_str, "%.3f", r);
-
-  sprintf(Cyc_str, "%d", round_cnt);
-  sprintf(time_str, "%d", time_cnt);
-  sprintf(UID_number, "%d", MY_NAME_IS_NODE);
+  sprintf(T_str, "%.2f", nodes[MY_NAME_IS_NODE].t);
+  sprintf(R_str, "%.3f", nodes[MY_NAME_IS_NODE].r);
+  sprintf(Cyc_str, "%d", nodes[MY_NAME_IS_NODE].round_cnt);
+  sprintf(time_str, "%d", nodes[MY_NAME_IS_NODE].time_cnt);
+  sprintf(UID_number, "%d", nodes[MY_NAME_IS_NODE].uid);
+  sprintf(CH_number, "%d", nodes[MY_NAME_IS_NODE].ch);
 
   strcpy(ptr->UID, UID);
   strcpy(ptr->UID_NUMBER, UID_number);
@@ -190,6 +201,8 @@ const char* create_packet(struct Packet *ptr)
   strcpy(ptr->ROUND_NUMBER, Cyc_str);
   strcpy(ptr->TIME, TIME);
   strcpy(ptr->TIME_NUMBER, time_str);
+  strcpy(ptr->CH, CH);
+  strcpy(ptr->CH_NUMBER, CH_number);
 
   strcpy(text, ptr->UID);
   strcat(text, ptr->UID_NUMBER);
@@ -201,6 +214,8 @@ const char* create_packet(struct Packet *ptr)
   strcat(text, ptr->ROUND_NUMBER);
   strcat(text, ptr->TIME);
   strcat(text, ptr->TIME_NUMBER);
+  strcat(text, ptr->CH);
+  strcat(text, ptr->CH_NUMBER);
 
   return text;
 }
@@ -212,6 +227,7 @@ void parse_packet(Packet *ptr, char *txt)
   char round_cnt[ROUND_NUMBER_LENGTH];
   char t[T_NUMBER_LENGTH];
   char r[R_NUMBER_LENGTH];
+  char ch[CH_NUMBER_LENGTH];
   unsigned char node;
   char *tmp;
 
@@ -220,8 +236,9 @@ void parse_packet(Packet *ptr, char *txt)
   round_cnt[ROUND_NUMBER_LENGTH - 1] = '\0';
   t[T_NUMBER_LENGTH - 1] = '\0';
   r[R_NUMBER_LENGTH - 1] = '\0';
+  ch[CH_NUMBER_LENGTH - 1] = '\0';
   
-  txt += UID_LENGTH - 1;
+  txt += UID_LENGTH;
   memcpy(uid, txt, sizeof(char));
   node = strtol(uid, &tmp, 10);
 
@@ -234,8 +251,12 @@ void parse_packet(Packet *ptr, char *txt)
   txt += (R_NUMBER_LENGTH - 1) + (ROUND_LENGTH - 1);
   memcpy(round_cnt, txt, (ROUND_NUMBER_LENGTH - 1) * sizeof(char));
 
-  txt += (TIME_LENGTH);
+  txt += (TIME_LENGTH - 1) +  (ROUND_NUMBER_LENGTH - 1);
   memcpy(time_cnt, txt, (TIME_NUMBER_LENGTH - 1) * sizeof(char));
+
+  txt += (CH_LENGTH - 1);
+  memcpy(ch, txt, (CH_NUMBER_LENGTH - 1) * sizeof(char));
+
   switch (node) {
 
     case NODE_0:
@@ -244,6 +265,7 @@ void parse_packet(Packet *ptr, char *txt)
     nodes[NODE_0].r = atof(r);
     nodes[NODE_0].round_cnt = atol(round_cnt);
     nodes[NODE_0].time_cnt = atol(time_cnt);
+    nodes[NODE_0].ch = atol(ch);
 
     break;
 
@@ -253,6 +275,7 @@ void parse_packet(Packet *ptr, char *txt)
     nodes[NODE_1].r = atof(r);
     nodes[NODE_1].round_cnt = atol(round_cnt);
     nodes[NODE_1].time_cnt = atol(time_cnt);
+    nodes[NODE_1].ch = atol(ch);
     
     break;
     
@@ -266,6 +289,12 @@ void setup() {
   char *tmp;
   nodes[NODE_0].uid = NODE_0;
   nodes[NODE_1].uid = NODE_1;
+
+  nodes[MY_NAME_IS_NODE].r = random_number();
+  nodes[MY_NAME_IS_NODE].round_cnt = round_cnt;
+  nodes[MY_NAME_IS_NODE].t = calculate_threshold(P, nodes[MY_NAME_IS_NODE].round_cnt);
+  nodes[MY_NAME_IS_NODE].time_cnt = time_cnt;
+  nodes[MY_NAME_IS_NODE].ch = CH_enable;
   
   Serial.begin(9600);
   WiFi.mode(WIFI_STA);
@@ -279,7 +308,7 @@ void setup() {
   packet_string = create_packet(&packet);
 
   #if DEBUG
-    print_packet();
+    print_packet(&packet);
     Serial.println(packet_string);
   #endif
 
@@ -290,7 +319,8 @@ void setup() {
 
 void loop() {
   int packetSize = Udp.parsePacket();
-    if (packetSize) {
+    if (packetSize && enable_count) {
+      timeout.attach(10, disable_count);
       Serial.printf("Received packet of size %d from %s:%d\n    (to %s:%d, free heap = %d B)\n",
                     packetSize,
                     Udp.remoteIP().toString().c_str(), Udp.remotePort(),
@@ -305,15 +335,19 @@ void loop() {
       struct Packet remote;
       parse_packet(&remote, packetBuffer);
 
+#if DEBUG
       Serial.println(nodes[NODE_0].t, 2);
       Serial.println(nodes[NODE_0].r, 3);
       Serial.println(nodes[NODE_0].round_cnt);
       Serial.println(nodes[NODE_0].time_cnt);
+      Serial.println(nodes[NODE_0].ch);
 
       Serial.println(nodes[NODE_1].t, 2);
       Serial.println(nodes[NODE_1].r, 3);
       Serial.println(nodes[NODE_1].round_cnt);
       Serial.println(nodes[NODE_1].time_cnt);
+      Serial.println(nodes[NODE_1].ch);
+#endif      
 /*
       Udp.beginPacket(broadcast, broadcast_port);
       Udp.write(T_letter);
